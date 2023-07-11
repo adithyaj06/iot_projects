@@ -1,0 +1,124 @@
+#include <Servo.h>
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+
+// Replace with your network credentials
+const char* ssid = "PARKING";
+const char* password = "12345";
+
+// Replace with your IoT platform details
+const char* serverAddress = "123456789";
+const int serverPort = 80;
+const char* endpoint = "977544";
+
+// Pin configuration
+const int triggerPin = 2;    // Ultrasonic sensor trigger pin
+const int echoPin = 3;       // Ultrasonic sensor echo pin
+const int servoPin = 9;      // Servo motor control pin
+
+// Variables
+long duration;
+int distance;
+int parkingSpaces = 3;       // Number of available parking spaces
+
+Servo gateServo;
+
+ESP8266WebServer server(80);
+
+void setup() {
+  Serial.begin(9600);
+
+  // Initialize servo motor
+  gateServo.attach(servoPin);
+
+  // Initialize ultrasonic sensor pins
+  pinMode(triggerPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+
+  Serial.println("Connected to WiFi");
+  Serial.print("Local IP: ");
+  Serial.println(WiFi.localIP());
+
+  // Start the web server
+  server.on("/", handleRoot);
+  server.begin();
+  Serial.println("Web server started");
+}
+
+void loop() {
+  // Check parking space occupancy
+  int occupancy = checkOccupancy();
+  
+  // Update parking status on the IoT platform
+  sendParkingStatus(occupancy);
+
+  // Delay before next iteration
+  delay(2000);
+}
+
+int checkOccupancy() {
+  // Measure distance using the ultrasonic sensor
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+  duration = pulseIn(echoPin, HIGH);
+  distance = duration * 0.034 / 2;
+
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+
+  // Calculate occupancy based on distance threshold
+  if (distance < 20) {
+    return parkingSpaces - 1; // Decrease available parking space count
+  } else {
+    return parkingSpaces;
+  }
+}
+
+void sendParkingStatus(int occupancy) {
+  // Connect to the IoT platform server
+  WiFiClient client;
+  if (!client.connect(serverAddress, serverPort)) {
+    Serial.println("Connection failed");
+    return;
+  }
+
+  // Prepare the HTTP request payload
+  String payload = "parking_spaces=" + String(occupancy);
+
+  // Send the HTTP POST request
+  client.println("POST " + String(endpoint) + " HTTP/1.1");
+  client.println("Host: " + String(serverAddress));
+  client.println("Content-Type: application/x-www-form-urlencoded");
+  client.println("Content-Length: " + String(payload.length()));
+  client.println();
+  client.println(payload);
+
+  // Print the response from the server
+  while (client.connected()) {
+    String line = client.readStringUntil('\n');
+    Serial.println(line);
+  }
+
+  // Close the connection
+  client.stop();
+}
+
+void handleRoot() {
+  String html = "<html><body><h1>Parking Management System</h1>";
+  html += "<p>Parking Spaces Available: " + String(parkingSpaces) + "</p>";
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
