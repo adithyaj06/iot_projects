@@ -1,0 +1,121 @@
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+
+// Replace with your network credentials
+const char* ssid = "HEALTH";
+const char* password = "12345";
+
+// Replace with your IoT platform details
+const char* serverAddress = "45773322";
+const int serverPort = 80;
+const char* endpoint = "/AJACA5463";
+
+// Pin configuration
+const int pulseSensorPin = A0;       // Pulse sensor analog pin
+const int temperatureSensorPin = D0; // Temperature sensor digital pin
+
+// Variables
+int heartRate;
+float bodyTemperature;
+
+ESP8266WebServer server(80);
+
+void setup() {
+  Serial.begin(9600);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+
+  Serial.println("Connected to WiFi");
+  Serial.print("Local IP: ");
+  Serial.println(WiFi.localIP());
+
+  // Start the web server
+  server.on("/", handleRoot);
+  server.begin();
+  Serial.println("Web server started");
+}
+
+void loop() {
+  // Read heart rate from pulse sensor
+  heartRate = readHeartRate();
+
+  // Read body temperature from temperature sensor
+  bodyTemperature = readBodyTemperature();
+
+  // Update health data on the IoT platform
+  sendHealthData(heartRate, bodyTemperature);
+
+  // Delay before next iteration
+  delay(2000);
+}
+
+int readHeartRate() {
+  // Read analog sensor value
+  int sensorValue = analogRead(pulseSensorPin);
+
+  // Map the sensor value to heart rate range (adjust as per sensor calibration)
+  int heartRate = map(sensorValue, 0, 1023, 60, 200);
+
+  Serial.print("Heart Rate: ");
+  Serial.println(heartRate);
+
+  return heartRate;
+}
+
+float readBodyTemperature() {
+  // Read analog sensor value
+  int sensorValue = analogRead(temperatureSensorPin);
+
+  // Convert sensor value to temperature in degrees Celsius (adjust as per sensor calibration)
+  float temperature = (sensorValue / 1023.0) * 5.0 * 100.0;
+
+  Serial.print("Body Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" °C");
+
+  return temperature;
+}
+
+void sendHealthData(int heartRate, float bodyTemperature) {
+  // Connect to the IoT platform server
+  WiFiClient client;
+  if (!client.connect(serverAddress, serverPort)) {
+    Serial.println("Connection failed");
+    return;
+  }
+
+  // Prepare the HTTP request payload
+  String payload = "heart_rate=" + String(heartRate) + "&body_temperature=" + String(bodyTemperature);
+
+  // Send the HTTP POST request
+  client.println("POST " + String(endpoint) + " HTTP/1.1");
+  client.println("Host: " + String(serverAddress));
+  client.println("Content-Type: application/x-www-form-urlencoded");
+  client.println("Content-Length: " + String(payload.length()));
+  client.println();
+  client.println(payload);
+
+  // Print the response from the server
+  while (client.connected()) {
+    String line = client.readStringUntil('\n');
+    Serial.println(line);
+  }
+
+  // Close the connection
+  client.stop();
+}
+
+void handleRoot() {
+  String html = "<html><body><h1>Health Monitoring System</h1>";
+  html += "<p>Heart Rate: " + String(heartRate) + " bpm</p>";
+  html += "<p>Body Temperature: " + String(bodyTemperature) + " °C</p>";
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
